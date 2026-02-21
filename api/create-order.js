@@ -178,6 +178,7 @@ export default async function handler(req, res) {
       introduction: deal.properties?.description || '',
     };
 
+    console.log('Creating Lexoffice order...');
     const orderRes = await fetch('https://api.lexoffice.io/v1/order-confirmations', {
       method: 'POST',
       headers: {
@@ -190,18 +191,23 @@ export default async function handler(req, res) {
 
     const order = await orderRes.json();
 
+    console.log('Lexoffice orderId:', order.id);
+
     if (!orderRes.ok) {
       return res.status(500).json({ error: 'Auftragsbestätigung konnte nicht erstellt werden', details: order });
     }
 
     // 5. Fetch full Lexoffice order for pricing and address details
+    console.log('Fetching Lexoffice order details...');
     const lexOrderRes = await fetch(`https://api.lexoffice.io/v1/order-confirmations/${order.id}`, {
       headers: {
         Authorization: `Bearer ${lexofficeKey}`,
         Accept: 'application/json',
       },
     });
+    console.log('Lexoffice order details status:', lexOrderRes.status);
     const lexOrder = await lexOrderRes.json();
+    console.log('Lexoffice totalPrice:', JSON.stringify(lexOrder.totalPrice));
 
     const lexAddress = lexOrder.address || {};
     const lexTotal = lexOrder.totalPrice || {};
