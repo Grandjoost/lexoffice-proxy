@@ -217,30 +217,32 @@ export default async function handler(req, res) {
       console.log('HubSpot Order ID:', hubspotOrderId);
 
       // Associate order with deal (0-123 = Orders, 0-3 = Deals)
-      // Associate order with company (0-2 = Companies)
-      // Associate order with contact (0-1 = Contacts)
-      const associations = [
-        { type: '0-3', id: dealId, label: 'deal' },
-        { type: '0-2', id: companyId, label: 'company' },
-      ];
-      if (contactId) {
-        associations.push({ type: '0-1', id: contactId, label: 'contact' });
-      }
+      try {
+        const dealAssocRes = await fetch(
+          `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-3/${dealId}`,
+          { method: 'PUT', headers: { Authorization: `Bearer ${hubspotToken}` } }
+        );
+        console.log('Order-deal association:', dealAssocRes.status);
+      } catch (e) { console.error('Order-deal association error:', e.message); }
 
-      for (const assoc of associations) {
+      // Associate order with company (0-2 = Companies)
+      try {
+        const compAssocRes = await fetch(
+          `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-2/${companyId}`,
+          { method: 'PUT', headers: { Authorization: `Bearer ${hubspotToken}` } }
+        );
+        console.log('Order-company association:', compAssocRes.status);
+      } catch (e) { console.error('Order-company association error:', e.message); }
+
+      // Associate order with contact (0-1 = Contacts)
+      if (contactId) {
         try {
-          const assocRes = await fetch(
-            `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/${assoc.type}/${assoc.id}/default`,
-            {
-              method: 'PUT',
-              headers: { Authorization: `Bearer ${hubspotToken}` },
-            }
+          const contAssocRes = await fetch(
+            `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-1/${contactId}`,
+            { method: 'PUT', headers: { Authorization: `Bearer ${hubspotToken}` } }
           );
-          const assocBody = await assocRes.text();
-          console.log(`Order-${assoc.label} association:`, assocRes.status, assocBody);
-        } catch (assocError) {
-          console.error(`Order-${assoc.label} association error:`, assocError.message);
-        }
+          console.log('Order-contact association:', contAssocRes.status);
+        } catch (e) { console.error('Order-contact association error:', e.message); }
       }
     }
 
