@@ -166,6 +166,10 @@ export default async function handler(req, res) {
       lineItems: lexofficeLineItems,
       totalPrice: { currency: 'EUR' },
       taxConditions: { taxType: 'net' },
+      shippingConditions: {
+        shippingType: 'serviceperiod',
+        shippingDate: new Date().toISOString(),
+      },
       introduction: deal.properties?.description || '',
     };
 
