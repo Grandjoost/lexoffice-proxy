@@ -41,6 +41,7 @@ export default async function handler(req, res) {
 
     const companyId = companyAssoc.results?.[0]?.id;
     const contactId = contactAssoc.results?.[0]?.id;
+    console.log('companyId value:', companyId, typeof companyId);
 
     if (!companyId) {
       return res.status(400).json({ error: 'Keine Company mit dem Deal verknüpft' });
@@ -227,13 +228,17 @@ export default async function handler(req, res) {
 
       // Associate order with company (0-2 = Companies)
       console.log('Company association - companyId:', companyId);
-      try {
-        const compAssocRes = await fetch(
-          `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-2/${companyId}`,
-          { method: 'PUT', headers: { Authorization: `Bearer ${hubspotToken}` } }
-        );
-        console.log('Order-company association:', compAssocRes.status);
-      } catch (e) { console.error('Order-company association error:', e.message); }
+      if (!companyId) {
+        console.warn('Skipping company association: companyId is', companyId);
+      } else {
+        try {
+          const compAssocRes = await fetch(
+            `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-2/${companyId}`,
+            { method: 'PUT', headers: { Authorization: `Bearer ${hubspotToken}` } }
+          );
+          console.log('Order-company association:', compAssocRes.status);
+        } catch (e) { console.error('Order-company association error:', e.message); }
+      }
 
       // Associate order with contact (0-1 = Contacts)
       if (contactId) {
