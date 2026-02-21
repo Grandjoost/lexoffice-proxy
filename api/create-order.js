@@ -215,7 +215,7 @@ export default async function handler(req, res) {
     // 6. Create HubSpot Order and associate with deal
     const dealName = deal.properties?.dealname || '';
     const hsOrderProperties = {
-      hs_order_name: `Auftragsbestätigung - ${dealName}`,
+      hs_order_name: `${lexOrder.voucherNumber || 'AB'} - ${dealName}`,
       hs_external_order_id: order.id,
       hs_external_order_status: 'draft',
       hs_pipeline: '1627093225',
