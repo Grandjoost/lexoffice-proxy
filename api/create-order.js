@@ -54,14 +54,22 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Keine Company mit dem Deal verknüpft' });
     }
 
-    // 2. Fetch line items from quote (preferred) or fall back to deal
+    // 2. Fetch quote details and line items from quote (preferred) or fall back to deal
     let lineItemIds;
+    let quoteData = null;
     if (quoteId) {
-      const quoteLineItemRes = await fetch(
-        `https://api.hubapi.com/crm/v3/objects/quotes/${quoteId}/associations/line_items`,
-        { headers: { Authorization: `Bearer ${hubspotToken}` } }
-      );
+      const [quoteLineItemRes, quoteDetailRes] = await Promise.all([
+        fetch(
+          `https://api.hubapi.com/crm/v3/objects/quotes/${quoteId}/associations/line_items`,
+          { headers: { Authorization: `Bearer ${hubspotToken}` } }
+        ),
+        fetch(
+          `https://api.hubapi.com/crm/v3/objects/quotes/${quoteId}?properties=hs_comments`,
+          { headers: { Authorization: `Bearer ${hubspotToken}` } }
+        ),
+      ]);
       const quoteLineItemAssoc = await quoteLineItemRes.json();
+      quoteData = await quoteDetailRes.json();
       console.log('Quote line items association response:', JSON.stringify(quoteLineItemAssoc));
       lineItemIds = (quoteLineItemAssoc.results || []).map((r) => r.id);
     } else {
@@ -71,7 +79,7 @@ export default async function handler(req, res) {
 
     const fetchPromises = [
       fetch(
-        `https://api.hubapi.com/crm/v3/objects/companies/${companyId}?properties=name,kunden_id,vat_id`,
+        `https://api.hubapi.com/crm/v3/objects/companies/${companyId}?properties=name,kunden_id,vat_id,country`,
         { headers: { Authorization: `Bearer ${hubspotToken}` } }
       ),
     ];
@@ -105,12 +113,18 @@ export default async function handler(req, res) {
     let kundenId = company.properties?.kunden_id;
 
     if (!kundenId) {
+      const vatId = company.properties.vat_id;
+      const country = company.properties.country;
+      const isGermany = !country || country === 'DE' || country === 'Germany' || country === 'Deutschland';
+      const hasVatId = !!vatId;
+
       const contactBody = {
         version: 0,
         roles: { customer: {} },
         company: {
           name: company.properties.name,
-          vatRegistrationId: company.properties.vat_id || '',
+          ...(hasVatId && { vatRegistrationId: vatId }),
+          allowTaxFreeInvoices: !isGermany && hasVatId,
           contactPersons: contact
             ? [
                 {
@@ -190,6 +204,7 @@ export default async function handler(req, res) {
         shippingType: 'none',
       },
       introduction: deal.properties?.description || '',
+      remark: quoteData?.properties?.hs_comments || deal.properties?.description || '',
     };
 
     console.log('Creating Lexoffice order...');
