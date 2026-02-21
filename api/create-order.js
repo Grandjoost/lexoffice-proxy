@@ -167,8 +167,7 @@ export default async function handler(req, res) {
       totalPrice: { currency: 'EUR' },
       taxConditions: { taxType: 'net' },
       shippingConditions: {
-        shippingType: 'serviceperiod',
-        shippingDate: new Date().toISOString(),
+        shippingType: 'none',
       },
       introduction: deal.properties?.description || '',
     };
