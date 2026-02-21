@@ -206,15 +206,24 @@ export default async function handler(req, res) {
     });
 
     const hsOrder = await hsOrderRes.json();
+    console.log('HubSpot Order response:', JSON.stringify(hsOrder));
 
-    if (hsOrderRes.ok) {
-      await fetch(
-        `https://api.hubapi.com/crm/v4/objects/orders/${hsOrder.id}/associations/deals/${dealId}/default`,
+    if (!hsOrderRes.ok) {
+      console.error('HubSpot Order creation failed:', hsOrderRes.status, JSON.stringify(hsOrder));
+    } else {
+      const hsOrderId = hsOrder.id;
+      console.log('HubSpot Order ID:', hsOrderId);
+      const assocRes = await fetch(
+        `https://api.hubapi.com/crm/v4/objects/orders/${hsOrderId}/associations/deals/${dealId}/default`,
         {
           method: 'PUT',
           headers: { Authorization: `Bearer ${hubspotToken}` },
         }
       );
+      if (!assocRes.ok) {
+        const assocErr = await assocRes.json();
+        console.error('HubSpot Order association failed:', assocRes.status, JSON.stringify(assocErr));
+      }
     }
 
     res.status(200).json({ orderId: order.id, hubspotOrderId: hsOrder.id });
