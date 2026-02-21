@@ -314,6 +314,7 @@ export default async function handler(req, res) {
       }
 
       // Associate order with line items (0-8 = Line Items)
+      console.log('lineItemIds:', JSON.stringify(lineItemIds));
       for (const lineItemId of lineItemIds) {
         try {
           const liAssocRes = await fetch(
