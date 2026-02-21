@@ -66,7 +66,7 @@ export default async function handler(req, res) {
           { headers: { Authorization: `Bearer ${hubspotToken}` } }
         ),
         fetch(
-          `https://api.hubapi.com/crm/v3/objects/quotes/${quoteId}?properties=hs_comments`,
+          `https://api.hubapi.com/crm/v3/objects/quotes/${quoteId}?properties=hs_comments,hs_quote_number`,
           { headers: { Authorization: `Bearer ${hubspotToken}` } }
         ),
       ]);
@@ -205,7 +205,7 @@ export default async function handler(req, res) {
       shippingConditions: {
         shippingType: 'none',
       },
-      introduction: deal.properties?.description || '',
+      introduction: quoteData?.properties?.hs_quote_number ? `Bezug: Angebot Nr. ${quoteData.properties.hs_quote_number}` : '',
       remark: stripHtml(quoteData?.properties?.hs_comments) || deal.properties?.description || '',
     };
 
