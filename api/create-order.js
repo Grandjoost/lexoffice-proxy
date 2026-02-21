@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   try {
     // 1. Fetch deal, associations in parallel
     const [dealRes, companyAssocRes, contactAssocRes, lineItemAssocRes, quoteAssocRes] = await Promise.all([
-      fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=description,dealname,hs_order_business_type`, {
+      fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=description,dealname,hs_order_business_type,hubspot_owner_id`, {
         headers: { Authorization: `Bearer ${hubspotToken}` },
       }),
       fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies`, {
@@ -218,6 +218,8 @@ export default async function handler(req, res) {
       hs_order_name: `Auftragsbestätigung - ${dealName}`,
       hs_external_order_id: order.id,
       hs_external_order_status: 'draft',
+      hs_pipeline: '1627093225',
+      hs_pipeline_stage: '2220863724',
       hs_subtotal_price: (lexTotal.totalNetAmount ?? '').toString(),
       hs_tax: (lexTotal.totalTaxAmount ?? '').toString(),
       hs_total_price: (lexTotal.totalGrossAmount ?? '').toString(),
@@ -225,6 +227,7 @@ export default async function handler(req, res) {
       hs_billing_address_street: [lexAddress.street, lexAddress.houseNumber].filter(Boolean).join(' '),
       hs_billing_address_city: lexAddress.city || '',
       hs_billing_address_postal_code: lexAddress.zip || '',
+      hs_billing_address_country: lexAddress.countryCode || '',
       hs_external_order_url: `https://app.lexoffice.de/vouchers#!/VoucherView/Order/${order.id}`,
       hs_external_created_date: lexOrder.createdDate || '',
     };
@@ -232,6 +235,10 @@ export default async function handler(req, res) {
     const businessType = deal.properties?.hs_order_business_type;
     if (businessType) {
       hsOrderProperties.hs_order_business_type = businessType;
+    }
+    const ownerId = deal.properties?.hubspot_owner_id;
+    if (ownerId) {
+      hsOrderProperties.hubspot_owner_id = ownerId;
     }
 
     const hsOrderRes = await fetch('https://api.hubapi.com/crm/v3/objects/orders', {
@@ -304,6 +311,17 @@ export default async function handler(req, res) {
           );
           console.log('Order-quote association:', quoteAssocRes.status);
         } catch (e) { console.error('Order-quote association error:', e.message); }
+      }
+
+      // Associate order with line items (0-8 = Line Items)
+      for (const lineItemId of lineItemIds) {
+        try {
+          const liAssocRes = await fetch(
+            `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-8/${lineItemId}`,
+            { method: 'PUT', headers: { Authorization: `Bearer ${hubspotToken}` } }
+          );
+          console.log(`Order-lineitem ${lineItemId} association:`, liAssocRes.status);
+        } catch (e) { console.error(`Order-lineitem ${lineItemId} association error:`, e.message); }
       }
     }
 
