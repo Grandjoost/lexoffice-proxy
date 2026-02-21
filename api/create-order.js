@@ -233,8 +233,15 @@ export default async function handler(req, res) {
       } else {
         try {
           const compAssocRes = await fetch(
-            `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-2/${companyId}`,
-            { method: 'PUT', headers: { Authorization: `Bearer ${hubspotToken}` } }
+            `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/0-2/${companyId}`,
+            {
+              method: 'PUT',
+              headers: {
+                Authorization: `Bearer ${hubspotToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify([{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 509 }]),
+            }
           );
           console.log('Order-company association:', compAssocRes.status);
         } catch (e) { console.error('Order-company association error:', e.message); }
