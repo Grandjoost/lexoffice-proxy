@@ -216,20 +216,31 @@ export default async function handler(req, res) {
       hubspotOrderId = hsOrder.properties?.hs_object_id;
       console.log('HubSpot Order ID:', hubspotOrderId);
 
-      try {
-        const assocRes = await fetch(
-          `https://api.hubapi.com/crm/v4/objects/orders/${hubspotOrderId}/associations/deals/${dealId}/default`,
-          {
-            method: 'PUT',
-            headers: { Authorization: `Bearer ${hubspotToken}` },
-          }
-        );
-        if (!assocRes.ok) {
-          const assocErr = await assocRes.text();
-          console.error('HubSpot Order association failed:', assocRes.status, assocErr);
+      // Associate order with deal (0-123 = Orders, 0-3 = Deals)
+      // Associate order with company (0-2 = Companies)
+      // Associate order with contact (0-1 = Contacts)
+      const associations = [
+        { type: '0-3', id: dealId, label: 'deal' },
+        { type: '0-2', id: companyId, label: 'company' },
+      ];
+      if (contactId) {
+        associations.push({ type: '0-1', id: contactId, label: 'contact' });
+      }
+
+      for (const assoc of associations) {
+        try {
+          const assocRes = await fetch(
+            `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/${assoc.type}/${assoc.id}/default`,
+            {
+              method: 'PUT',
+              headers: { Authorization: `Bearer ${hubspotToken}` },
+            }
+          );
+          const assocBody = await assocRes.text();
+          console.log(`Order-${assoc.label} association:`, assocRes.status, assocBody);
+        } catch (assocError) {
+          console.error(`Order-${assoc.label} association error:`, assocError.message);
         }
-      } catch (assocError) {
-        console.error('HubSpot Order association error:', assocError.message);
       }
     }
 
