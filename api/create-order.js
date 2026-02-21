@@ -1,3 +1,5 @@
+const stripHtml = (html) => html ? html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim() : '';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -204,7 +206,7 @@ export default async function handler(req, res) {
         shippingType: 'none',
       },
       introduction: deal.properties?.description || '',
-      remark: quoteData?.properties?.hs_comments || deal.properties?.description || '',
+      remark: stripHtml(quoteData?.properties?.hs_comments) || deal.properties?.description || '',
     };
 
     console.log('Creating Lexoffice order...');
