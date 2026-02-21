@@ -51,7 +51,7 @@ export default async function handler(req, res) {
 
     const fetchPromises = [
       fetch(
-        `https://api.hubapi.com/crm/v3/objects/companies/${companyId}?properties=name,kunden_id`,
+        `https://api.hubapi.com/crm/v3/objects/companies/${companyId}?properties=name,kunden_id,vat_id`,
         { headers: { Authorization: `Bearer ${hubspotToken}` } }
       ),
     ];
@@ -90,6 +90,7 @@ export default async function handler(req, res) {
         roles: { customer: {} },
         company: {
           name: company.properties.name,
+          vatRegistrationId: company.properties.vat_id || '',
           contactPersons: contact
             ? [
                 {
