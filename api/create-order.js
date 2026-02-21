@@ -48,13 +48,26 @@ export default async function handler(req, res) {
     const contactId = contactAssoc.results?.[0]?.id;
     const quoteId = quoteAssoc.results?.[0]?.id;
     console.log('companyId value:', companyId, typeof companyId);
+    console.log('quoteId value:', quoteId);
 
     if (!companyId) {
       return res.status(400).json({ error: 'Keine Company mit dem Deal verknüpft' });
     }
 
-    // 2. Fetch company, contact, and line items in parallel
-    const lineItemIds = (lineItemAssoc.results || []).map((r) => r.id);
+    // 2. Fetch line items from quote (preferred) or fall back to deal
+    let lineItemIds;
+    if (quoteId) {
+      const quoteLineItemRes = await fetch(
+        `https://api.hubapi.com/crm/v3/objects/quotes/${quoteId}/associations/line_items`,
+        { headers: { Authorization: `Bearer ${hubspotToken}` } }
+      );
+      const quoteLineItemAssoc = await quoteLineItemRes.json();
+      console.log('Quote line items association response:', JSON.stringify(quoteLineItemAssoc));
+      lineItemIds = (quoteLineItemAssoc.results || []).map((r) => r.id);
+    } else {
+      lineItemIds = (lineItemAssoc.results || []).map((r) => r.id);
+      console.log('Falling back to deal line items:', JSON.stringify(lineItemIds));
+    }
 
     const fetchPromises = [
       fetch(
