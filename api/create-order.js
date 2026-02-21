@@ -37,6 +37,7 @@ export default async function handler(req, res) {
     const companyAssoc = await companyAssocRes.json();
     const contactAssoc = await contactAssocRes.json();
     const lineItemAssoc = await lineItemAssocRes.json();
+    console.log('Line items association response:', JSON.stringify(lineItemAssoc));
     const quoteAssoc = await quoteAssocRes.json();
 
     if (!dealRes.ok) {
