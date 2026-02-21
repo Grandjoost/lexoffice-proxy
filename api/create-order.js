@@ -16,7 +16,7 @@ export default async function handler(req, res) {
   try {
     // 1. Fetch deal, associations in parallel
     const [dealRes, companyAssocRes, contactAssocRes, lineItemAssocRes] = await Promise.all([
-      fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=description`, {
+      fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=description,dealname`, {
         headers: { Authorization: `Bearer ${hubspotToken}` },
       }),
       fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies`, {
@@ -188,7 +188,36 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Auftragsbestätigung konnte nicht erstellt werden', details: order });
     }
 
-    res.status(200).json({ orderId: order.id });
+    // 5. Create HubSpot Order and associate with deal
+    const dealName = deal.properties?.dealname || '';
+    const hsOrderRes = await fetch('https://api.hubapi.com/crm/v3/objects/orders', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${hubspotToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        properties: {
+          hs_order_name: `Auftragsbestätigung - ${dealName}`,
+          hs_external_order_id: order.id,
+          hs_external_order_status: 'draft',
+        },
+      }),
+    });
+
+    const hsOrder = await hsOrderRes.json();
+
+    if (hsOrderRes.ok) {
+      await fetch(
+        `https://api.hubapi.com/crm/v4/objects/orders/${hsOrder.id}/associations/deals/${dealId}/default`,
+        {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${hubspotToken}` },
+        }
+      );
+    }
+
+    res.status(200).json({ orderId: order.id, hubspotOrderId: hsOrder.id });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
