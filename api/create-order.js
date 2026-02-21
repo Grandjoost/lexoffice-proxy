@@ -15,8 +15,8 @@ export default async function handler(req, res) {
 
   try {
     // 1. Fetch deal, associations in parallel
-    const [dealRes, companyAssocRes, contactAssocRes, lineItemAssocRes] = await Promise.all([
-      fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=description,dealname`, {
+    const [dealRes, companyAssocRes, contactAssocRes, lineItemAssocRes, quoteAssocRes] = await Promise.all([
+      fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=description,dealname,hs_order_business_type`, {
         headers: { Authorization: `Bearer ${hubspotToken}` },
       }),
       fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies`, {
@@ -28,12 +28,16 @@ export default async function handler(req, res) {
       fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/line_items`, {
         headers: { Authorization: `Bearer ${hubspotToken}` },
       }),
+      fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/quotes`, {
+        headers: { Authorization: `Bearer ${hubspotToken}` },
+      }),
     ]);
 
     const deal = await dealRes.json();
     const companyAssoc = await companyAssocRes.json();
     const contactAssoc = await contactAssocRes.json();
     const lineItemAssoc = await lineItemAssocRes.json();
+    const quoteAssoc = await quoteAssocRes.json();
 
     if (!dealRes.ok) {
       return res.status(404).json({ error: 'Deal nicht gefunden', details: deal });
@@ -41,6 +45,7 @@ export default async function handler(req, res) {
 
     const companyId = companyAssoc.results?.[0]?.id;
     const contactId = contactAssoc.results?.[0]?.id;
+    const quoteId = quoteAssoc.results?.[0]?.id;
     console.log('companyId value:', companyId, typeof companyId);
 
     if (!companyId) {
@@ -189,21 +194,47 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Auftragsbestätigung konnte nicht erstellt werden', details: order });
     }
 
-    // 5. Create HubSpot Order and associate with deal
+    // 5. Fetch full Lexoffice order for pricing and address details
+    const lexOrderRes = await fetch(`https://api.lexoffice.io/v1/order-confirmations/${order.id}`, {
+      headers: {
+        Authorization: `Bearer ${lexofficeKey}`,
+        Accept: 'application/json',
+      },
+    });
+    const lexOrder = await lexOrderRes.json();
+
+    const lexAddress = lexOrder.address || {};
+    const lexTotal = lexOrder.totalPrice || {};
+
+    // 6. Create HubSpot Order and associate with deal
     const dealName = deal.properties?.dealname || '';
+    const hsOrderProperties = {
+      hs_order_name: `Auftragsbestätigung - ${dealName}`,
+      hs_external_order_id: order.id,
+      hs_external_order_status: 'draft',
+      hs_subtotal_price: (lexTotal.totalNetAmount ?? '').toString(),
+      hs_tax: (lexTotal.totalTaxAmount ?? '').toString(),
+      hs_total_price: (lexTotal.totalGrossAmount ?? '').toString(),
+      hs_billing_address_name: lexAddress.name || '',
+      hs_billing_address_street: [lexAddress.street, lexAddress.houseNumber].filter(Boolean).join(' '),
+      hs_billing_address_city: lexAddress.city || '',
+      hs_billing_address_postal_code: lexAddress.zip || '',
+      hs_external_order_url: `https://app.lexoffice.de/vouchers#!/VoucherView/Order/${order.id}`,
+      hs_external_created_date: lexOrder.createdDate || '',
+    };
+
+    const businessType = deal.properties?.hs_order_business_type;
+    if (businessType) {
+      hsOrderProperties.hs_order_business_type = businessType;
+    }
+
     const hsOrderRes = await fetch('https://api.hubapi.com/crm/v3/objects/orders', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${hubspotToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        properties: {
-          hs_order_name: `Auftragsbestätigung - ${dealName}`,
-          hs_external_order_id: order.id,
-          hs_external_order_status: 'draft',
-        },
-      }),
+      body: JSON.stringify({ properties: hsOrderProperties }),
     });
 
     const hsOrder = await hsOrderRes.json();
@@ -256,6 +287,17 @@ export default async function handler(req, res) {
           );
           console.log('Order-contact association:', contAssocRes.status);
         } catch (e) { console.error('Order-contact association error:', e.message); }
+      }
+
+      // Associate order with quote (0-14 = Quotes)
+      if (quoteId) {
+        try {
+          const quoteAssocRes = await fetch(
+            `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-14/${quoteId}`,
+            { method: 'PUT', headers: { Authorization: `Bearer ${hubspotToken}` } }
+          );
+          console.log('Order-quote association:', quoteAssocRes.status);
+        } catch (e) { console.error('Order-quote association error:', e.message); }
       }
     }
 
