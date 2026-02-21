@@ -226,6 +226,7 @@ export default async function handler(req, res) {
       } catch (e) { console.error('Order-deal association error:', e.message); }
 
       // Associate order with company (0-2 = Companies)
+      console.log('Company association - companyId:', companyId);
       try {
         const compAssocRes = await fetch(
           `https://api.hubapi.com/crm/v4/objects/0-123/${hubspotOrderId}/associations/default/0-2/${companyId}`,
