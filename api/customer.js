@@ -38,19 +38,23 @@ export default async function handler(req, res) {
     }
 
     const voucherRes = await fetchWithRetry(
-      `https://api.lexware.io/v1/voucherlist?voucherType=invoice,salesinvoice,downpaymentinvoice&voucherStatus=paid,paidoff&contactId=${kunden_id}&page=0&size=100`,
+      `https://api.lexware.io/v1/voucherlist?voucherType=invoice,salesinvoice,downpaymentinvoice&voucherStatus=open,draft,paid,paidoff,voided&contactId=${kunden_id}&page=0&size=100`,
       { headers }
     );
 
     let billedRevenue = null;
+    let vouchers = [];
     if (voucherRes.ok) {
-      const vouchers = await voucherRes.json();
-      billedRevenue = (vouchers.content || []).reduce((sum, v) => sum + (v.totalAmount || 0), 0);
+      const voucherData = await voucherRes.json();
+      vouchers = voucherData.content || [];
+      billedRevenue = vouchers
+        .filter(v => v.voucherStatus === 'paid' || v.voucherStatus === 'paidoff')
+        .reduce((sum, v) => sum + (v.totalAmount || 0), 0);
     } else {
       console.error('[customer] Voucher fetch failed:', voucherRes.status);
     }
 
-    res.status(200).json({ ...contact, billedRevenue });
+    res.status(200).json({ ...contact, billedRevenue, vouchers });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
