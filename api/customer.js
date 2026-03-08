@@ -18,10 +18,18 @@ export default async function handler(req, res) {
 
     const contact = await contactRes.json();
 
+    if (!contactRes.ok) {
+      console.error('[customer] Lexoffice contact fetch failed:', contactRes.status, JSON.stringify(contact));
+      return res.status(contactRes.status).json({ error: contact.message || contact.IssueList?.[0]?.i18nKey || 'Fehler beim Laden des Lexoffice-Kontakts', details: contact });
+    }
+
     let billedRevenue = null;
     if (voucherRes.ok) {
       const vouchers = await voucherRes.json();
       billedRevenue = (vouchers.content || []).reduce((sum, v) => sum + (v.totalAmount || 0), 0);
+      console.log(`[customer] billedRevenue for ${kunden_id}: ${billedRevenue} (${vouchers.content?.length} vouchers)`);
+    } else {
+      console.error('[customer] Voucher fetch failed:', voucherRes.status);
     }
 
     res.status(200).json({ ...contact, billedRevenue });
