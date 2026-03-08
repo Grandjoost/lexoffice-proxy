@@ -40,9 +40,9 @@ export default async function handler(req, res) {
       return await handleInvoiceCreated(req, res, { resourceId, HUBSPOT_TOKEN, LEXOFFICE_TOKEN, lexPath: '/v1/invoices/' });
     } else if (eventType === 'invoice.status.changed' || eventType === 'invoice.changed') {
       return await handleInvoiceStatusChanged(req, res, { resourceId, eventDate, eventType, HUBSPOT_TOKEN, LEXOFFICE_TOKEN, lexPath: '/v1/invoices/' });
-    } else if (eventType === 'downpaymentinvoice.created') {
+    } else if (eventType === 'down-payment-invoice.created') {
       return await handleInvoiceCreated(req, res, { resourceId, HUBSPOT_TOKEN, LEXOFFICE_TOKEN, lexPath: '/v1/down-payment-invoices/' });
-    } else if (eventType === 'downpaymentinvoice.changed') {
+    } else if (eventType === 'down-payment-invoice.changed' || eventType === 'down-payment-invoice.status.changed') {
       return await handleInvoiceStatusChanged(req, res, { resourceId, eventDate, eventType, HUBSPOT_TOKEN, LEXOFFICE_TOKEN, lexPath: '/v1/down-payment-invoices/' });
     } else if (eventType === 'order-confirmation.status.changed') {
       return await handleOrderConfirmationStatusChanged(req, res, { resourceId, eventDate, HUBSPOT_TOKEN, LEXOFFICE_TOKEN });
