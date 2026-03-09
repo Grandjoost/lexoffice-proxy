@@ -25,6 +25,7 @@ export default async function handler(req, res) {
     vatId,
     contactName,
     contactEmail,
+    eInvoiceAddress,
   } = body;
 
   if (!companyId || !name) {
@@ -69,6 +70,7 @@ export default async function handler(req, res) {
         contactPersons,
       },
       ...(hasBillingAddress && { addresses: { billing: [billingAddress] } }),
+      ...(eInvoiceAddress && { emailAddresses: { business: [eInvoiceAddress] } }),
     };
 
     const createRes = await fetch('https://api.lexware.io/v1/contacts', {
