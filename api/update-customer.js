@@ -82,6 +82,12 @@ export default async function handler(req, res) {
     delete updateBody.createdDate;
     delete updateBody.updatedDate;
     delete updateBody.archived;
+    delete updateBody.organizationId;
+    delete updateBody._links;
+    delete updateBody.billedRevenue;
+    delete updateBody.vouchers;
+
+    console.log('[update-customer] Updating contact', kundenId, JSON.stringify(updateBody).substring(0, 500));
 
     const updateRes = await fetch(`https://api.lexware.io/v1/contacts/${kundenId}`, {
       method: 'PUT',
