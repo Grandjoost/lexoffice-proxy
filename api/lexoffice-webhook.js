@@ -197,7 +197,7 @@ async function createHubSpotInvoice(invoice, resourceId, HUBSPOT_TOKEN) {
     hs_amount_billed: String(totalGross),
     amount_open: String(totalGross),
     hs_number: invoice.voucherNumber,
-    invoice_id_lexoffice: resourceId,
+    lexoffice_invoice_id: resourceId,
     url_lexoffice_invoice: 'https://app.lexoffice.de/vouchers#!/VoucherView/' + urlType + '/' + resourceId
   };
 
@@ -340,8 +340,8 @@ async function createHubSpotInvoice(invoice, resourceId, HUBSPOT_TOKEN) {
 async function handleInvoiceCreated(req, res, { resourceId, HUBSPOT_TOKEN, LEXOFFICE_TOKEN, lexPath = '/v1/invoices/' }) {
   // 1. Check if invoice already exists in HubSpot (duplicate protection)
   const existing = await searchHubSpotObject(
-    'invoices', 'invoice_id_lexoffice', resourceId,
-    ['invoice_id_lexoffice'], HUBSPOT_TOKEN
+    'invoices', 'lexoffice_invoice_id', resourceId,
+    ['lexoffice_invoice_id'], HUBSPOT_TOKEN
   );
 
   if (existing) {
@@ -416,13 +416,24 @@ async function handleInvoiceStatusChanged(req, res, { resourceId, eventDate, eve
 
   // 3. Search HubSpot invoice
   const hsInvoice = await searchHubSpotObject(
-    'invoices', 'invoice_id_lexoffice', resourceId,
-    ['invoice_id_lexoffice', 'hs_invoice_status', 'amount_open', 'hs_amount_billed', 'hs_invoice_date', 'hs_due_date'], HUBSPOT_TOKEN
+    'invoices', 'lexoffice_invoice_id', resourceId,
+    ['lexoffice_invoice_id', 'hs_invoice_status', 'amount_open', 'hs_amount_billed', 'hs_invoice_date', 'hs_due_date'], HUBSPOT_TOKEN
   );
 
   if (!hsInvoice) {
     // No HubSpot invoice yet — create it if no longer draft (was skipped during invoice.created)
     if (lexStatus !== 'draft') {
+      // Wait 3s before creating — avoids race condition with invoice.created which may have
+      // just created the invoice but HubSpot search index hasn't caught up yet
+      await new Promise(r => setTimeout(r, 3000));
+      const doubleCheck = await searchHubSpotObject(
+        'invoices', 'lexoffice_invoice_id', resourceId,
+        ['lexoffice_invoice_id'], HUBSPOT_TOKEN
+      );
+      if (doubleCheck) {
+        console.log('[lexoffice-webhook] Invoice already created by invoice.created event:', doubleCheck.id);
+        return res.status(200).json({ ok: true, action: 'skipped', reason: 'created by invoice.created', hsId: doubleCheck.id });
+      }
       console.log('[lexoffice-webhook] No HubSpot invoice for', resourceId, '— creating now (status:', lexStatus + ', path:', lexPath + ')');
       const result = await createHubSpotInvoice(lexInvoice, resourceId, HUBSPOT_TOKEN);
       return res.status(200).json({
