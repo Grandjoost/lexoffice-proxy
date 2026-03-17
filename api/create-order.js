@@ -118,7 +118,7 @@ export default async function handler(req, res) {
     for (const itemId of lineItemIds) {
       fetchPromises.push(
         fetch(
-          `https://api.hubapi.com/crm/v3/objects/line_items/${itemId}?properties=name,description,quantity,price,hs_discount_percentage,hs_tax_rate_group_id,amount,hs_recurring_billing_period,hs_sku,hs_recurring_billing_start_date,hs_billing_start_delay_type,hs_billing_start_delay_months,hs_billing_start_delay_days`,
+          `https://api.hubapi.com/crm/v3/objects/line_items/${itemId}?properties=name,description,quantity,price,hs_discount_percentage,hs_tax_rate_group_id,amount,recurringbillingfrequency,hs_recurring_billing_period,hs_sku,hs_recurring_billing_start_date,hs_billing_start_delay_type,hs_billing_start_delay_months,hs_billing_start_delay_days`,
           { headers: { Authorization: `Bearer ${hubspotToken}` } }
         )
       );
@@ -265,7 +265,7 @@ export default async function handler(req, res) {
     }
 
     // 5. Determine Tage vs Retainer deal
-    const hasRecurring = lineItems.some(li => parseRecurringPeriod(li.properties.hs_recurring_billing_period) !== null);
+    const hasRecurring = lineItems.some(li => !!li.properties.recurringbillingfrequency);
     const paymentTermLabel = hasRecurring
       ? 'Die Abrechnung erfolgt monatlich zum Monatsanfang. Die Zahlung des Auftraggebers ist sofort fällig. Der Auftraggeber wird darauf hingewiesen, dass er spätestens 30 Tage nach Zugang der Rechnung in Verzug gerät.'
       : 'Die Abrechnung erfolgt monatlich zum Monatsende. Die Zahlung des Auftraggebers ist sofort fällig. Der Auftraggeber wird darauf hingewiesen, dass er spätestens 30 Tage nach Zugang der Rechnung in Verzug gerät.';
@@ -276,15 +276,15 @@ export default async function handler(req, res) {
       const netAmount = parseFloat(props.price) || 0;
       const discount = parseFloat(props.hs_discount_percentage) || 0;
 
+      const isRecurring = !!props.recurringbillingfrequency;
       const recurringMonths = parseRecurringPeriod(props.hs_recurring_billing_period);
-      const isRecurring = recurringMonths !== null;
 
       const lineItem = {
         type: 'custom',
         name: props.name || '',
         productNumber: props.hs_sku || undefined,
         description: props.description || '',
-        quantity: isRecurring ? recurringMonths : (parseFloat(props.quantity) || 1),
+        quantity: isRecurring ? (recurringMonths || parseFloat(props.quantity) || 1) : (parseFloat(props.quantity) || 1),
         unitName: isRecurring ? 'Monate' : 'Tage',
         unitPrice: {
           currency: 'EUR',
@@ -480,6 +480,7 @@ export default async function handler(req, res) {
         price: parseFloat(li.properties.price),
         discount: parseFloat(li.properties.hs_discount_percentage) || 0,
         quantity: parseFloat(li.properties.quantity),
+        recurringbillingfrequency: li.properties.recurringbillingfrequency || null,
         hs_recurring_billing_period: li.properties.hs_recurring_billing_period || null,
         hs_recurring_billing_start_date: li.properties.hs_recurring_billing_start_date || null,
         hs_billing_start_delay_type: li.properties.hs_billing_start_delay_type || null,
