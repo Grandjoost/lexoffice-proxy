@@ -19,7 +19,9 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function lexofficeRequest(path) {
+const MAX_RETRIES = 5;
+
+async function lexofficeRequest(path, attempt = 0) {
   const elapsed = Date.now() - lastRequestTime;
   if (elapsed < RATE_LIMIT_MS) {
     await sleep(RATE_LIMIT_MS - elapsed);
@@ -34,9 +36,13 @@ async function lexofficeRequest(path) {
   });
 
   if (response.status === 429) {
-    console.warn('[sync-expenses] Rate limited — warte 2s');
-    await sleep(2000);
-    return lexofficeRequest(path);
+    if (attempt >= MAX_RETRIES) {
+      throw new Error(`Lexoffice ${path}: Rate limit nach ${MAX_RETRIES} Versuchen`);
+    }
+    const backoff = 2000 * (attempt + 1);
+    console.warn(`[sync-expenses] Rate limited — warte ${backoff}ms (Versuch ${attempt + 1}/${MAX_RETRIES})`);
+    await sleep(backoff);
+    return lexofficeRequest(path, attempt + 1);
   }
 
   if (!response.ok) {
@@ -117,19 +123,29 @@ async function syncInvoices(month) {
   const lastDay = new Date(year, mon, 0).getDate();
   const dateTo = `${month}-${String(lastDay).padStart(2, '0')}`;
 
-  const params = new URLSearchParams({
-    voucherType: 'invoice,salesinvoice',
-    voucherStatus: 'open,paid,paidoff,draft',
-    voucherDateFrom: dateFrom,
-    voucherDateTo: dateTo,
-    page: '0',
-    size: '100',
-    sortColumn: 'voucherDate',
-    sortDirection: 'DESC',
-  });
+  const invoiceList = [];
+  let page = 0;
+  let hasMore = true;
 
-  const data = await lexofficeRequest(`/v1/voucherlist?${params}`);
-  const invoiceList = data?.content || [];
+  while (hasMore) {
+    const params = new URLSearchParams({
+      voucherType: 'invoice,salesinvoice',
+      voucherStatus: 'open,paid,paidoff,draft',
+      voucherDateFrom: dateFrom,
+      voucherDateTo: dateTo,
+      page: String(page),
+      size: '100',
+      sortColumn: 'voucherDate',
+      sortDirection: 'DESC',
+    });
+
+    const data = await lexofficeRequest(`/v1/voucherlist?${params}`);
+    const content = data?.content || [];
+    invoiceList.push(...content);
+
+    hasMore = content.length === 100;
+    page++;
+  }
 
   const invoices = [];
   const skipped = [];
