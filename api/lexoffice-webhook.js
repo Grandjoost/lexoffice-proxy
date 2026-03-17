@@ -7,6 +7,8 @@
 // Rate limit strategy: No self-retry on 429. Error bubbles up → Lexoffice retries after 10/20/40/80/160s.
 // invoice.status.changed is kept in router for backwards compat but subscription is removed (redundant with invoice.changed).
 
+import { LEXOFFICE_STATUS_MAP, INVOICE_ASSOC_TYPE_IDS, createDefaultAssociation } from '../lib/shared.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -137,45 +139,12 @@ async function getAssociations(fromType, fromId, toType, token) {
 
 
 // ============================================================
-// HELPER: Create default association (v4 API, no typeId needed)
-// PUT /crm/v4/objects/{from}/{fromId}/associations/default/{to}/{toId}
-// ============================================================
-async function createDefaultAssociation(fromType, fromId, toType, toId, token) {
-  const res = await fetch(
-    'https://api.hubapi.com/crm/v4/objects/' + fromType + '/' + fromId + '/associations/default/' + toType + '/' + toId,
-    {
-      method: 'PUT',
-      headers: { 'Authorization': 'Bearer ' + token }
-    }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error('[hubspot-assoc] Failed to create association', fromType, fromId, '->', toType, toId, res.status, text);
-    return false;
-  }
-
-  console.log('[hubspot-assoc] Created:', fromType, fromId, '->', toType, toId);
-  return true;
-}
-
-
-// ============================================================
 // HELPER: Create HubSpot Invoice from Lexoffice invoice data
 // Shared by handleInvoiceCreated and handleInvoiceStatusChanged
 // Returns { hsInvoiceId, voucherNumber, hsStatus, assocResults }
 // ============================================================
 async function createHubSpotInvoice(invoice, resourceId, HUBSPOT_TOKEN) {
-  const statusMap = {
-    'draft': 'draft',
-    'open': 'open',
-    'overdue': 'open',
-    'paid': 'paid',
-    'paidoff': 'voided',
-    'voided': 'voided',
-    'cancelled': 'voided'
-  };
-  const hsStatus = statusMap[invoice.voucherStatus] || 'open';
+  const hsStatus = LEXOFFICE_STATUS_MAP[invoice.voucherStatus] || 'open';
 
   let dueDate = null;
   if (invoice.paymentConditions?.paymentTermDuration && invoice.voucherDate) {
@@ -271,17 +240,11 @@ async function createHubSpotInvoice(invoice, resourceId, HUBSPOT_TOKEN) {
     }
   }
 
-  const ASSOC_TYPE_IDS = {
-    companies: 179,
-    contacts: 181,
-    deals: 175,
-  };
-
   const inlineAssociations = [];
   const deferredAssociations = [];
 
   for (const assoc of associations) {
-    const typeId = ASSOC_TYPE_IDS[assoc.type];
+    const typeId = INVOICE_ASSOC_TYPE_IDS[assoc.type];
     if (typeId) {
       inlineAssociations.push({
         to: { id: assoc.id },
@@ -456,16 +419,7 @@ async function handleInvoiceStatusChanged(req, res, { resourceId, eventDate, eve
   const currentBilled = parseFloat(hsInvoice.properties.hs_amount_billed) || 0;
 
   // 4. Map status
-  const statusMap = {
-    'draft': 'draft',
-    'open': 'open',
-    'overdue': 'open',
-    'paid': 'paid',
-    'paidoff': 'voided',
-    'voided': 'voided',
-    'cancelled': 'voided'
-  };
-  const newStatus = statusMap[lexStatus] || 'open';
+  const newStatus = LEXOFFICE_STATUS_MAP[lexStatus] || 'open';
 
   // 5. Build update
   const update = {};

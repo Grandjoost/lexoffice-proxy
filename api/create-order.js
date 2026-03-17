@@ -1,4 +1,5 @@
 import { checkOrigin } from './_middleware.js';
+import { EU_COUNTRIES } from '../lib/shared.js';
 
 const stripHtml = (html) => html ? html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim() : '';
 
@@ -24,12 +25,6 @@ export default async function handler(req, res) {
   if (!dealId) {
     return res.status(400).json({ error: 'Keine Deal-ID übergeben' });
   }
-
-  const EU_COUNTRIES = new Set([
-    'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
-    'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL',
-    'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
-  ]);
 
   try {
     // 1. Fetch deal, associations in parallel

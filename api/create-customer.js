@@ -1,10 +1,5 @@
 import { checkOrigin } from './_middleware.js';
-
-const EU_COUNTRIES = new Set([
-  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR',
-  'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL',
-  'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
-]);
+import { EU_COUNTRIES } from '../lib/shared.js';
 
 export default async function handler(req, res) {
   if (!checkOrigin(req, res)) return;

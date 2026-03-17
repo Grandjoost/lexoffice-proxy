@@ -1,6 +1,8 @@
 // One-off endpoint to manually sync a Lexoffice down-payment invoice into HubSpot.
 // Usage: GET /api/sync-downpayment?resourceId=<lexoffice-uuid>&token=<webhook-secret>
 
+import { LEXOFFICE_STATUS_MAP, INVOICE_ASSOC_TYPE_IDS, createDefaultAssociation } from '../lib/shared.js';
+
 export default async function handler(req, res) {
   const expectedToken = process.env.WEBHOOK_SECRET;
   if (expectedToken && req.query.token !== expectedToken) {
@@ -72,8 +74,7 @@ export default async function handler(req, res) {
     }
 
     // 3. Build properties
-    const statusMap = { draft: 'draft', open: 'open', overdue: 'open', paid: 'paid', paidoff: 'voided', voided: 'voided' };
-    const hsStatus = statusMap[invoice.voucherStatus] || 'open';
+    const hsStatus = LEXOFFICE_STATUS_MAP[invoice.voucherStatus] || 'open';
     const totalGross = invoice.totalPrice?.totalGrossAmount ?? 0;
     const totalNet = invoice.totalPrice?.totalNetAmount ?? totalGross;
     const totalTax = invoice.totalPrice?.totalTaxAmount ?? Math.round((totalGross - totalNet) * 100) / 100;
@@ -126,11 +127,10 @@ export default async function handler(req, res) {
     }
 
     // 5. Create invoice with inline associations (companies + deals)
-    const ASSOC_TYPE_IDS = { companies: 179, deals: 175 };
     const inlineAssoc = associations
-      .filter(a => ASSOC_TYPE_IDS[a.type])
-      .map(a => ({ to: { id: a.id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: ASSOC_TYPE_IDS[a.type] }] }));
-    const deferredAssoc = associations.filter(a => !ASSOC_TYPE_IDS[a.type]);
+      .filter(a => INVOICE_ASSOC_TYPE_IDS[a.type])
+      .map(a => ({ to: { id: a.id }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: INVOICE_ASSOC_TYPE_IDS[a.type] }] }));
+    const deferredAssoc = associations.filter(a => !INVOICE_ASSOC_TYPE_IDS[a.type]);
 
     const createBody = { properties };
     if (inlineAssoc.length) createBody.associations = inlineAssoc;
@@ -151,10 +151,7 @@ export default async function handler(req, res) {
 
     // 6. Deferred associations (orders, contacts)
     for (const assoc of deferredAssoc) {
-      await fetch(
-        `https://api.hubapi.com/crm/v4/objects/invoices/${hsInvoiceId}/associations/default/${assoc.type}/${assoc.id}`,
-        { method: 'PUT', headers: { Authorization: `Bearer ${HUBSPOT_TOKEN}` } }
-      );
+      await createDefaultAssociation('invoices', hsInvoiceId, assoc.type, assoc.id, HUBSPOT_TOKEN);
     }
 
     return res.status(200).json({
