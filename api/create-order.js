@@ -300,15 +300,38 @@ export default async function handler(req, res) {
       return lineItem;
     });
 
+    // Leistungszeitraum aus Start + Term berechnen
+    let shippingConditions = { shippingType: 'none' };
+    let earliestStart = null;
+    let latestEnd = null;
+    for (const item of lineItems) {
+      const props = item.properties;
+      const start = props.hs_recurring_billing_start_date;
+      const months = parseRecurringPeriod(props.hs_recurring_billing_period);
+      if (start && months) {
+        if (!earliestStart || start < earliestStart) earliestStart = start;
+        const end = new Date(start);
+        end.setMonth(end.getMonth() + months);
+        end.setDate(end.getDate() - 1);
+        const endStr = end.toISOString().split('T')[0];
+        if (!latestEnd || endStr > latestEnd) latestEnd = endStr;
+      }
+    }
+    if (earliestStart && latestEnd) {
+      shippingConditions = {
+        shippingType: 'serviceperiod',
+        shippingDate: earliestStart + 'T00:00:00.000+01:00',
+        shippingEndDate: latestEnd + 'T00:00:00.000+01:00',
+      };
+    }
+
     const orderBody = {
       voucherDate: new Date().toISOString(),
       address: { contactId: kundenId },
       lineItems: lexofficeLineItems,
       totalPrice: { currency: 'EUR' },
       taxConditions: { taxType },
-      shippingConditions: {
-        shippingType: 'none',
-      },
+      shippingConditions,
       paymentConditions: {
         paymentTermLabel: paymentTermLabel,
         paymentTermDuration: 30,
