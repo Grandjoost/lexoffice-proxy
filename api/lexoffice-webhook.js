@@ -7,7 +7,8 @@
 // Rate limit strategy: No self-retry on 429. Error bubbles up → Lexoffice retries after 10/20/40/80/160s.
 // invoice.status.changed is kept in router for backwards compat but subscription is removed (redundant with invoice.changed).
 
-import { LEXOFFICE_STATUS_MAP, INVOICE_ASSOC_TYPE_IDS, createDefaultAssociation } from '../lib/shared.js';
+import { LEXOFFICE_STATUS_MAP, createDefaultAssociation } from '../lib/shared.js';
+import { createHubSpotInvoice, fetchLexoffice, searchHubSpotObject, getAssociations } from '../lib/invoice-sync.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -59,242 +60,8 @@ export default async function handler(req, res) {
 }
 
 
-// ============================================================
-// HELPER: Fetch from Lexoffice API
-// ============================================================
-async function fetchLexoffice(path, token) {
-  const res = await fetch('https://api.lexware.io' + path, {
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Accept': 'application/json'
-    }
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error('Lexoffice ' + path + ' returned ' + res.status + ': ' + text);
-  }
-  return res.json();
-}
-
-
-// ============================================================
-// HELPER: Search HubSpot for a single object by property value
-// Returns the first result or null
-// ============================================================
-async function searchHubSpotObject(objectType, propertyName, value, properties, token) {
-  const res = await fetch('https://api.hubapi.com/crm/v3/objects/' + objectType + '/search', {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + token,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      filterGroups: [{
-        filters: [{
-          propertyName: propertyName,
-          operator: 'EQ',
-          value: value
-        }]
-      }],
-      properties: properties,
-      limit: 1
-    })
-  });
-
-  if (!res.ok) {
-    console.error('[hubspot-search] Error searching', objectType, res.status);
-    return null;
-  }
-
-  const data = await res.json();
-  if (data.total > 0) {
-    return data.results[0];
-  }
-  return null;
-}
-
-
-// ============================================================
-// HELPER: Get associations for a HubSpot object
-// Uses v4 API: GET /crm/v4/objects/{from}/{id}/associations/{to}
-// Returns array of { id } objects
-// ============================================================
-async function getAssociations(fromType, fromId, toType, token) {
-  const res = await fetch(
-    'https://api.hubapi.com/crm/v4/objects/' + fromType + '/' + fromId + '/associations/' + toType,
-    {
-      headers: { 'Authorization': 'Bearer ' + token }
-    }
-  );
-
-  if (!res.ok) {
-    console.log('[hubspot-assoc] No associations', fromType, fromId, '->', toType, res.status);
-    return [];
-  }
-
-  const data = await res.json();
-  // v4 returns { results: [{ toObjectId: "123", associationTypes: [...] }] }
-  return (data.results || []).map(r => ({ id: String(r.toObjectId) }));
-}
-
-
-// ============================================================
-// HELPER: Create HubSpot Invoice from Lexoffice invoice data
-// Shared by handleInvoiceCreated and handleInvoiceStatusChanged
-// Returns { hsInvoiceId, voucherNumber, hsStatus, assocResults }
-// ============================================================
-async function createHubSpotInvoice(invoice, resourceId, HUBSPOT_TOKEN) {
-  const hsStatus = LEXOFFICE_STATUS_MAP[invoice.voucherStatus] || 'open';
-
-  let dueDate = null;
-  if (invoice.paymentConditions?.paymentTermDuration && invoice.voucherDate) {
-    const vDate = new Date(invoice.voucherDate);
-    vDate.setDate(vDate.getDate() + invoice.paymentConditions.paymentTermDuration);
-    dueDate = vDate.toISOString().split('T')[0];
-  }
-
-  const voucherType = invoice.voucherType || 'invoice';
-  const urlType = voucherType.charAt(0).toUpperCase() + voucherType.slice(1);
-  const totalGross = invoice.totalPrice?.totalGrossAmount ?? 0;
-
-  const properties = {
-    hs_currency: 'EUR',
-    hs_invoice_billable: 'false',
-    hs_invoice_status: hsStatus,
-    hs_invoice_date: invoice.voucherDate ? invoice.voucherDate.split('T')[0] : null,
-    hs_external_createdate: invoice.createdDate || null,
-    hs_amount_billed: String(totalGross),
-    amount_open: String(totalGross),
-    hs_number: invoice.voucherNumber,
-    lexoffice_invoice_id: resourceId,
-    url_lexoffice_invoice: 'https://app.lexoffice.de/vouchers#!/VoucherView/' + urlType + '/' + resourceId
-  };
-
-  if (dueDate) {
-    properties.hs_due_date = dueDate;
-  }
-
-  Object.keys(properties).forEach(key => {
-    if (properties[key] === null || properties[key] === undefined) {
-      delete properties[key];
-    }
-  });
-
-  // Find associations
-  const associations = [];
-
-  const orderVoucher = (invoice.relatedVouchers || []).find(
-    v => v.voucherType === 'orderconfirmation'
-  );
-
-  if (orderVoucher) {
-    console.log('[lexoffice-webhook] Found related order confirmation:', orderVoucher.id);
-
-    const hsOrder = await searchHubSpotObject(
-      'orders', 'hs_external_order_id', orderVoucher.id,
-      ['hs_external_order_id', 'hs_order_name'], HUBSPOT_TOKEN
-    );
-
-    if (hsOrder) {
-      associations.push({ type: 'orders', id: hsOrder.id });
-      console.log('[lexoffice-webhook] Found HubSpot Order:', hsOrder.id, hsOrder.properties.hs_order_name);
-
-      const [orderDeals, orderCompanies, orderContacts] = await Promise.all([
-        getAssociations('orders', hsOrder.id, 'deals', HUBSPOT_TOKEN),
-        getAssociations('orders', hsOrder.id, 'companies', HUBSPOT_TOKEN),
-        getAssociations('orders', hsOrder.id, 'contacts', HUBSPOT_TOKEN)
-      ]);
-
-      orderDeals.forEach(d => associations.push({ type: 'deals', id: d.id }));
-      orderCompanies.forEach(c => associations.push({ type: 'companies', id: c.id }));
-      orderContacts.forEach(c => associations.push({ type: 'contacts', id: c.id }));
-
-      console.log('[lexoffice-webhook] Inherited from Order:',
-        orderDeals.length, 'deals,', orderCompanies.length, 'companies,', orderContacts.length, 'contacts');
-    } else {
-      console.log('[lexoffice-webhook] Order not found in HubSpot for', orderVoucher.id);
-    }
-  }
-
-  const hasCompany = associations.some(a => a.type === 'companies');
-
-  if (!hasCompany) {
-    const lexContactId = invoice.address?.contactId;
-
-    if (lexContactId) {
-      console.log('[lexoffice-webhook] Fallback: searching Company by kunden_id:', lexContactId);
-
-      const hsCompany = await searchHubSpotObject(
-        'companies', 'kunden_id', lexContactId,
-        ['kunden_id', 'name'], HUBSPOT_TOKEN
-      );
-
-      if (hsCompany) {
-        associations.push({ type: 'companies', id: hsCompany.id });
-        console.log('[lexoffice-webhook] Found Company via kunden_id:', hsCompany.id, hsCompany.properties.name);
-      } else {
-        console.log('[lexoffice-webhook] No Company found for kunden_id:', lexContactId);
-      }
-    } else {
-      console.log('[lexoffice-webhook] No contactId on invoice (Sammelkunde?)');
-    }
-  }
-
-  const inlineAssociations = [];
-  const deferredAssociations = [];
-
-  for (const assoc of associations) {
-    const typeId = INVOICE_ASSOC_TYPE_IDS[assoc.type];
-    if (typeId) {
-      inlineAssociations.push({
-        to: { id: assoc.id },
-        types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: typeId }]
-      });
-    } else {
-      deferredAssociations.push(assoc);
-    }
-  }
-
-  console.log('[lexoffice-webhook] Creating Invoice:', invoice.voucherNumber,
-    'inline:', inlineAssociations.length, 'deferred:', deferredAssociations.length);
-
-  const createBody = { properties };
-  if (inlineAssociations.length > 0) {
-    createBody.associations = inlineAssociations;
-  }
-
-  const createRes = await fetch('https://api.hubapi.com/crm/v3/objects/invoices', {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + HUBSPOT_TOKEN,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(createBody)
-  });
-
-  if (!createRes.ok) {
-    const errText = await createRes.text();
-    console.error('[lexoffice-webhook] HubSpot invoice create error', createRes.status, errText);
-    throw new Error('HubSpot invoice create failed: ' + errText);
-  }
-
-  const created = await createRes.json();
-  const hsInvoiceId = created.id;
-  console.log('[lexoffice-webhook] Created HubSpot Invoice:', hsInvoiceId);
-
-  const assocResults = associations.map(a => ({ type: a.type, id: a.id, ok: true }));
-
-  for (const assoc of deferredAssociations) {
-    const ok = await createDefaultAssociation('invoices', hsInvoiceId, assoc.type, assoc.id, HUBSPOT_TOKEN);
-    const entry = assocResults.find(r => r.type === assoc.type && r.id === assoc.id);
-    if (entry) entry.ok = ok;
-  }
-
-  console.log('[lexoffice-webhook] Done:', invoice.voucherNumber, '→ HubSpot', hsInvoiceId,
-    'with', assocResults.filter(a => a.ok).length + '/' + assocResults.length, 'associations');
-
-  return { hsInvoiceId, voucherNumber: invoice.voucherNumber, hsStatus, assocResults };
-}
+// Helpers (fetchLexoffice, searchHubSpotObject, getAssociations, createHubSpotInvoice)
+// are imported from ../lib/invoice-sync.js
 
 
 // ============================================================
@@ -380,7 +147,7 @@ async function handleInvoiceStatusChanged(req, res, { resourceId, eventDate, eve
   // 3. Search HubSpot invoice
   const hsInvoice = await searchHubSpotObject(
     'invoices', 'lexoffice_invoice_id', resourceId,
-    ['lexoffice_invoice_id', 'hs_invoice_status', 'amount_open', 'hs_amount_billed', 'hs_invoice_date', 'hs_due_date'], HUBSPOT_TOKEN
+    ['lexoffice_invoice_id', 'hs_invoice_status', 'amount_open', 'hs_amount_billed', 'hs_invoice_date', 'hs_due_date', 'lex_service_from', 'lex_service_to'], HUBSPOT_TOKEN
   );
 
   if (!hsInvoice) {
@@ -444,13 +211,24 @@ async function handleInvoiceStatusChanged(req, res, { resourceId, eventDate, eve
   }
 
   let dueDate = null;
-  if (lexInvoice.paymentConditions?.paymentTermDuration && lexInvoice.voucherDate) {
+  if (lexInvoice.paymentConditions?.paymentTermDuration != null && lexInvoice.voucherDate) {
     const vDate = new Date(lexInvoice.voucherDate);
     vDate.setDate(vDate.getDate() + lexInvoice.paymentConditions.paymentTermDuration);
     dueDate = vDate.toISOString().split('T')[0];
   }
   if (dueDate && dueDate !== (hsInvoice.properties.hs_due_date || '').split('T')[0]) {
     update.hs_due_date = dueDate;
+  }
+
+  // Sync service period (Leistungszeitraum)
+  const sc = lexInvoice.shippingConditions || {};
+  const newFrom = sc.shippingDate ? sc.shippingDate.split('T')[0] : null;
+  const newTo = sc.shippingEndDate ? sc.shippingEndDate.split('T')[0] : null;
+  if (newFrom && newFrom !== (hsInvoice.properties.lex_service_from || '').split('T')[0]) {
+    update.lex_service_from = newFrom;
+  }
+  if (newTo && newTo !== (hsInvoice.properties.lex_service_to || '').split('T')[0]) {
+    update.lex_service_to = newTo;
   }
 
   if (newStatus === 'paid' && currentStatus !== 'paid') {
