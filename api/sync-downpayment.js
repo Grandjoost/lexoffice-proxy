@@ -79,6 +79,7 @@ export default async function handler(req, res) {
     const totalNet = invoice.totalPrice?.totalNetAmount ?? totalGross;
     const totalTax = invoice.totalPrice?.totalTaxAmount ?? Math.round((totalGross - totalNet) * 100) / 100;
 
+    const sc = invoice.shippingConditions || {};
     const properties = {
       hs_currency: 'EUR',
       hs_invoice_billable: 'false',
@@ -91,7 +92,9 @@ export default async function handler(req, res) {
       amount_open: String(totalGross),
       hs_number: invoice.voucherNumber,
       lexoffice_invoice_id: resourceId,
-      url_lexoffice_invoice: correctUrl
+      url_lexoffice_invoice: correctUrl,
+      lex_service_from: sc.shippingDate ? sc.shippingDate.split('T')[0] : null,
+      lex_service_to: sc.shippingEndDate ? sc.shippingEndDate.split('T')[0] : null,
     };
     Object.keys(properties).forEach(k => { if (properties[k] === null) delete properties[k]; });
 
