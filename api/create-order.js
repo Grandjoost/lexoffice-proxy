@@ -285,7 +285,7 @@ export default async function handler(req, res) {
         productNumber: props.hs_sku || undefined,
         description: props.description || '',
         quantity: isRecurring ? (recurringMonths || parseFloat(props.quantity) || 1) : (parseFloat(props.quantity) || 1),
-        unitName: isRecurring ? 'Monate' : 'Tage',
+        unitName: 'Stück',
         unitPrice: {
           currency: 'EUR',
           netAmount,
