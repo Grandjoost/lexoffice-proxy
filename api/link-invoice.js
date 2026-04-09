@@ -44,6 +44,12 @@ export default async function handler(req, res) {
     if (req.query.action === 'inspect') {
       return await handleInspect(req, res, HUBSPOT_TOKEN);
     }
+    if (req.query.action === 'inspect-lex') {
+      return await handleInspectLex(req, res, LEXOFFICE_TOKEN);
+    }
+    if (req.query.action === 'inspect-li') {
+      return await handleInspectLineItem(req, res, HUBSPOT_TOKEN);
+    }
     return await handleList(req, res, HUBSPOT_TOKEN, LEXOFFICE_TOKEN);
   }
   if (req.method === 'POST') {
@@ -289,6 +295,37 @@ async function handleUnlink(req, res, HUBSPOT_TOKEN) {
     return res.status(500).json({ error: 'Unlink failed: ' + text });
   }
   return res.status(200).json({ ok: true, hsInvoiceId: invId, dealId, status: 'unlinked' });
+}
+
+async function handleInspectLineItem(req, res, HUBSPOT_TOKEN) {
+  const { id } = req.query;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const r = await fetch('https://api.hubapi.com/crm/v3/objects/line_items/' + id + '?properties=name,recurringbillingfrequency,hs_recurring_billing_period,quantity,price,hs_sku', {
+    headers: { 'Authorization': 'Bearer ' + HUBSPOT_TOKEN },
+  });
+  if (!r.ok) return res.status(r.status).json({ error: await r.text() });
+  return res.status(200).json(await r.json());
+}
+
+async function handleInspectLex(req, res, LEXOFFICE_TOKEN) {
+  const { id } = req.query;
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const r = await fetch('https://api.lexware.io/v1/invoices/' + id, {
+    headers: { 'Authorization': 'Bearer ' + LEXOFFICE_TOKEN, 'Accept': 'application/json' },
+  });
+  if (!r.ok) return res.status(r.status).json({ error: await r.text() });
+  const inv = await r.json();
+  return res.status(200).json({
+    voucherNumber: inv.voucherNumber,
+    voucherDate: inv.voucherDate,
+    lineItems: (inv.lineItems || []).map(li => ({
+      name: li.name,
+      quantity: li.quantity,
+      unitName: li.unitName,
+      netAmount: li.unitPrice?.netAmount,
+    })),
+    shippingConditions: inv.shippingConditions,
+  });
 }
 
 async function handleInspect(req, res, HUBSPOT_TOKEN) {
