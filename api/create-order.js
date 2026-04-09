@@ -1,14 +1,11 @@
 import { checkOrigin } from './_middleware.js';
-import { EU_COUNTRIES } from '../lib/shared.js';
+import {
+  deriveTaxRate,
+  mapLineItemToABPosition,
+  calculateDealRange,
+} from '../lib/line-item-mapping.js';
 
 const stripHtml = (html) => html ? html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim() : '';
-
-// "P3M" → 3, "P12M" → 12
-function parseRecurringPeriod(period) {
-  if (!period) return null;
-  const match = period.match(/^P(\d+)M$/);
-  return match ? parseInt(match[1], 10) : null;
-}
 
 export default async function handler(req, res) {
   if (!checkOrigin(req, res)) return;
@@ -247,81 +244,43 @@ export default async function handler(req, res) {
       }
     }
 
-    // 4. Determine tax type from country + VAT ID
-    const companyCountry = company.properties.country;
-    const companyVatId = company.properties.vat_id;
-    const normalizedCountry = (!companyCountry || companyCountry === 'Germany' || companyCountry === 'Deutschland') ? 'DE' : companyCountry;
+    // 4. Tax-Logik (shared lib)
+    const { taxType, taxRatePercentage } = deriveTaxRate(company.properties);
 
-    let taxType, taxRatePercentage;
-    if (normalizedCountry === 'DE') {
-      taxType = 'net';
-      taxRatePercentage = 19;
-    } else if (EU_COUNTRIES.has(normalizedCountry) && companyVatId) {
-      taxType = 'intraCommunitySupply';
-      taxRatePercentage = 0;
-    } else {
-      taxType = 'thirdPartyCountryService';
-      taxRatePercentage = 0;
-    }
+    // 5. Line Items flatten (HubSpot → flat shape für shared lib)
+    const flatLineItems = lineItems.map((item) => ({
+      id: item.id,
+      ...item.properties,
+    }));
 
-    // 5. Determine Tage vs Retainer deal
-    const hasRecurring = lineItems.some(li => !!li.properties.recurringbillingfrequency);
+    // 6. Payment Terms — recurring vs one-time
+    const hasRecurring = flatLineItems.some(li => !!li.recurringbillingfrequency);
     const paymentTermLabel = hasRecurring
       ? 'Die Abrechnung erfolgt monatlich zum Monatsanfang. Die Zahlung des Auftraggebers ist sofort fällig. Der Auftraggeber wird darauf hingewiesen, dass er spätestens 30 Tage nach Zugang der Rechnung in Verzug gerät.'
       : 'Die Abrechnung erfolgt monatlich zum Monatsende. Die Zahlung des Auftraggebers ist sofort fällig. Der Auftraggeber wird darauf hingewiesen, dass er spätestens 30 Tage nach Zugang der Rechnung in Verzug gerät.';
 
-    // 6. Build Lexoffice order confirmation
-    const lexofficeLineItems = lineItems.map((item) => {
-      const props = item.properties;
-      const netAmount = parseFloat(props.price) || 0;
-      const discount = parseFloat(props.hs_discount_percentage) || 0;
-
-      const isRecurring = !!props.recurringbillingfrequency;
-      const recurringMonths = parseRecurringPeriod(props.hs_recurring_billing_period);
-
-      const lineItem = {
-        type: 'custom',
-        name: props.name || '',
-        productNumber: props.hs_sku || undefined,
-        description: props.description || '',
-        quantity: isRecurring ? (recurringMonths || parseFloat(props.quantity) || 1) : (parseFloat(props.quantity) || 1),
-        unitName: 'Stück',
-        unitPrice: {
-          currency: 'EUR',
-          netAmount,
-          taxRatePercentage,
-        },
-      };
-
-      if (discount > 0) {
-        lineItem.discountPercentage = discount;
-      }
-
-      return lineItem;
-    });
-
-    // Leistungszeitraum aus Start + Term berechnen
-    let shippingConditions = { shippingType: 'none' };
-    let earliestStart = null;
-    let latestEnd = null;
-    for (const item of lineItems) {
-      const props = item.properties;
-      const start = props.hs_recurring_billing_start_date;
-      const months = parseRecurringPeriod(props.hs_recurring_billing_period);
-      if (start && months) {
-        if (!earliestStart || start < earliestStart) earliestStart = start;
-        const end = new Date(start);
-        end.setMonth(end.getMonth() + months);
-        end.setDate(end.getDate() - 1);
-        const endStr = end.toISOString().split('T')[0];
-        if (!latestEnd || endStr > latestEnd) latestEnd = endStr;
-      }
+    // 7. Lexoffice AB-Positionen via shared lib (inkl. Pflicht-Gegenprobe)
+    let lexofficeLineItems;
+    try {
+      lexofficeLineItems = flatLineItems.map((li) => {
+        const position = mapLineItemToABPosition(li, taxRatePercentage);
+        // SKU auf AB-Position erhalten — wird in create-invoice für T&M-Matching gebraucht
+        if (li.hs_sku) position.productNumber = li.hs_sku;
+        return position;
+      });
+    } catch (err) {
+      console.error('[create-order] Mapping-Fehler:', err.message);
+      return res.status(400).json({ error: err.message });
     }
-    if (earliestStart && latestEnd) {
+
+    // 8. Shipping Conditions (Leistungszeitraum aus shared lib)
+    let shippingConditions = { shippingType: 'none' };
+    const dealRange = calculateDealRange(flatLineItems);
+    if (dealRange) {
       shippingConditions = {
         shippingType: 'serviceperiod',
-        shippingDate: earliestStart + 'T00:00:00.000+01:00',
-        shippingEndDate: latestEnd + 'T00:00:00.000+01:00',
+        shippingDate: dealRange.earliestStart + 'T00:00:00.000+01:00',
+        shippingEndDate: dealRange.latestEnd + 'T00:00:00.000+01:00',
       };
     }
 
