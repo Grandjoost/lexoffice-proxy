@@ -453,6 +453,7 @@ export default async function handler(req, res) {
       hubspotOrderId,
       companyName: company.properties.name,
       dealName,
+      dealDescription: deal.properties?.description || null,
       dealOwnerEmail: ownerEmail,
       orderNumber: lexOrder.voucherNumber || null,
       lineItems: lineItems.map(li => ({
