@@ -50,21 +50,39 @@ export default async function handler(req, res) {
 
     const companyId = companyAssoc.results?.[0]?.id;
     const contactId = contactAssoc.results?.[0]?.id;
-    const quoteId = quoteAssoc.results?.[0]?.id;
+    const quoteIds = (quoteAssoc.results || []).map((r) => r.id || r.toObjectId).filter(Boolean).map(String);
 
     if (!companyId) {
       return res.status(400).json({ error: 'Keine Company mit dem Deal verknüpft' });
     }
-    if (!quoteId) {
+    if (quoteIds.length === 0) {
       return res.status(400).json({ error: 'Keine Quote am Deal gefunden' });
     }
 
-    // Quote laden inkl. bestehender Lexoffice-Referenz
-    const quoteDetailRes = await fetch(
-      `https://api.hubapi.com/crm/v3/objects/quotes/${quoteId}?properties=hs_title,hs_status,hs_sign_status,hs_expiration_date,hs_quote_amount,hs_quote_number,hs_comments,lex_quotation_id`,
-      { headers: { Authorization: `Bearer ${hubspotToken}` } }
+    // Neuestes Quote wählen (wie deal-data.js)
+    const quoteProps = 'hs_title,hs_status,hs_sign_status,hs_expiration_date,hs_quote_amount,hs_quote_number,hs_comments,hs_createdate,lex_quotation_id';
+    const allQuotes = (
+      await Promise.all(
+        quoteIds.map((qId) =>
+          fetch(
+            `https://api.hubapi.com/crm/v3/objects/quotes/${qId}?properties=${quoteProps}`,
+            { headers: { Authorization: `Bearer ${hubspotToken}` } }
+          ).then((r) => (r.ok ? r.json() : null))
+        )
+      )
+    ).filter(Boolean);
+
+    allQuotes.sort(
+      (a, b) =>
+        new Date(b.properties.hs_createdate).getTime() -
+        new Date(a.properties.hs_createdate).getTime()
     );
-    const quoteData = await quoteDetailRes.json();
+    const quoteData = allQuotes[0];
+    const quoteId = quoteData?.id;
+
+    if (!quoteId) {
+      return res.status(400).json({ error: 'Keine Quote am Deal gefunden' });
+    }
 
     if (quoteData?.properties?.lex_quotation_id) {
       return res.status(409).json({
