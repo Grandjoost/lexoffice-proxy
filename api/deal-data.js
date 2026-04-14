@@ -70,6 +70,8 @@ export default async function handler(req, res) {
         'hs_expiration_date',
         'hs_quote_amount',
         'hs_createdate',
+        'lex_quotation_id',
+        'url_lexoffice_quotation',
       ];
       const allQuotes = (
         await Promise.all(
