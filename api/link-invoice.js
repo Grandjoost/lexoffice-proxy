@@ -480,13 +480,18 @@ async function handleList(req, res, HUBSPOT_TOKEN, LEXOFFICE_TOKEN) {
       });
     }
 
-    // Strict filter: keep invoices whose service period starts in the requested
-    // month, and keep all salesinvoice vouchers (no service period available).
+    // Filter:
+    // - salesinvoice → immer rein (keine Service-Period verfügbar)
+    // - invoice mit Service-Period → strikt nach period.from
+    // - invoice OHNE Service-Period → Fallback auf voucherDate-Monat,
+    //   damit manuelle Lexoffice-Rechnungen ohne shippingConditions
+    //   trotzdem auffindbar sind (sonst unsichtbar in der Verknüpfungs-Liste).
     const filtered = sorted.filter(v => {
       if (v.voucherType === 'salesinvoice') return true;
       const period = periodById.get(v.id);
-      if (!period) return false;
-      return period.from.startsWith(month);
+      if (period) return period.from.startsWith(month);
+      const voucherMonth = (v.voucherDate || '').substring(0, 7);
+      return voucherMonth === month;
     });
 
     if (filtered.length === 0) {
